@@ -49,6 +49,7 @@ private:
     vk::SurfaceKHR m_Surface;
     VkSwapchainKHR m_SwapChain;
     std::vector<VkImage> m_SwapChainImages;
+    std::vector<VkImageView> m_SwapChainImageViews;
     vk::Format m_SwapChainImageFormat;
     vk::Extent2D m_SwapChainExtent;
 
@@ -242,8 +243,27 @@ private:
         m_SwapChainImageFormat = createInfo.imageFormat;
         m_SwapChainExtent = createInfo.imageExtent;
 
-        // Get images
+        // Get images and image views
         for (const vk::Image& image : m_Device.getSwapchainImagesKHR(m_SwapChain)) m_SwapChainImages.push_back(image);
+
+        for (const vk::Image& image : m_SwapChainImages)
+        {
+            vk::ImageViewCreateInfo createInfo;
+            createInfo.image = image;
+            createInfo.viewType = vk::ImageViewType::e2D;
+            createInfo.format = m_SwapChainImageFormat;
+            createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+            createInfo.components.g = vk::ComponentSwizzle::eIdentity;;
+            createInfo.components.b = vk::ComponentSwizzle::eIdentity;;
+            createInfo.components.a = vk::ComponentSwizzle::eIdentity;;
+            createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+            createInfo.subresourceRange.baseMipLevel = 0;
+            createInfo.subresourceRange.levelCount = 1;
+            createInfo.subresourceRange.baseArrayLayer = 0;
+            createInfo.subresourceRange.layerCount = 1;
+
+            m_SwapChainImageViews.push_back(m_Device.createImageView(createInfo));
+        }
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
@@ -282,6 +302,11 @@ private:
 
     void Uninitialize()
     {
+        for (auto& imageView : m_SwapChainImageViews) m_Device.destroyImageView(imageView);
+        m_SwapChainImageViews.clear();
+
+        m_SwapChainImages.clear(); // No need to destroy, we didn't create them
+
         m_Device.destroySwapchainKHR(m_SwapChain);
         m_Device.destroy();
         m_Instance.destroySurfaceKHR(m_Surface);
