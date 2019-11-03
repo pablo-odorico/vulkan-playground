@@ -10,6 +10,14 @@
 
 #include <vulkan/vulkan.hpp>
 
+#define LOAD_RESOURCE(NAME)                                                               \
+    extern "C" const size_t rc_size_##NAME;                                               \
+    extern "C" const unsigned char* rc_data_##NAME;                                       \
+    const std::pair<const unsigned char*, size_t> NAME = {rc_data_##NAME, rc_size_##NAME};
+
+LOAD_RESOURCE(vertex_shader);
+LOAD_RESOURCE(fragment_shader);
+
 struct QueueFamilyIndices
 {
     std::optional<uint32_t> graphics;
@@ -213,7 +221,7 @@ private:
         const vk::Extent2D extent = (capabilities.currentExtent.width != UINT32_MAX) ?
             capabilities.currentExtent :
             vk::Extent2D(std::clamp(WIDTH, capabilities.minImageExtent.width, capabilities.maxImageExtent.width), std::clamp(HEIGHT, capabilities.minImageExtent.height, capabilities.maxImageExtent.height));
- 
+
         // Chain length
         uint32_t imageCount = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount > 0) imageCount = std::min(imageCount, capabilities.maxImageCount);
@@ -322,6 +330,8 @@ private:
 int main()
 {
     VulkanApp app;
+    
+
 
     try {
         app.Run();

@@ -28,5 +28,18 @@ add_executable(VulkanSample ${SOURCES})
 target_include_directories(VulkanSample PRIVATE Vulkan::Vulkan)
 target_link_libraries(VulkanSample Vulkan::Vulkan glfw)
 
-target_resource(VulkanSample ${CMAKE_SOURCE_DIR}/resources/shader.vert "vertex_shader")
-target_resource(VulkanSample ${CMAKE_SOURCE_DIR}/resources/shader.frag "fragment_shader")
+function(target_shader TARGET SHADER_PATH RESOURCE_NAME)
+    set(GLSLC_BIN_PATH ${Vulkan_INCLUDE_DIR}/../bin/glslc.exe)
+    get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
+    set(GENERATED_FILE_PATH "${CMAKE_BINARY_DIR}/Generated/Shaders/${FILE_NAME}.bin")
+    add_custom_command(
+        OUTPUT ${GENERATED_FILE_PATH}
+        COMMAND ${GLSLC_BIN_PATH} ${SHADER_PATH} -o ${GENERATED_FILE_PATH}
+        DEPENDS ${SHADER_PATH}
+    )
+    target_resource(${TARGET} ${GENERATED_FILE_PATH} ${RESOURCE_NAME})
+endfunction()
+
+target_shader(VulkanSample ${CMAKE_SOURCE_DIR}/resources/shader.vert "vertex_shader")
+target_shader(VulkanSample ${CMAKE_SOURCE_DIR}/resources/shader.frag "fragment_shader")
+#target_resource(VulkanSample ${CMAKE_SOURCE_DIR}/resources/texture.png "texture")
