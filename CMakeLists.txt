@@ -18,6 +18,8 @@ include_directories(${VULKAN_CPP_DIR}/glfw/include)
 
 include_directories(${VULKAN_CPP_DIR}/glm)
 
+add_subdirectory(ResourceCompiler)
+
 set(SOURCES
 	src/main.cpp
 )
@@ -25,3 +27,6 @@ set(SOURCES
 add_executable(VulkanSample ${SOURCES})
 target_include_directories(VulkanSample PRIVATE Vulkan::Vulkan)
 target_link_libraries(VulkanSample Vulkan::Vulkan glfw)
+
+target_resource(VulkanSample ${CMAKE_SOURCE_DIR}/resources/shader.vert "vertex_shader")
+target_resource(VulkanSample ${CMAKE_SOURCE_DIR}/resources/shader.frag "fragment_shader")

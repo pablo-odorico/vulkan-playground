@@ -48,7 +48,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    outputFile << "const uint8_t rc_data_" << resourceName << "[] = {";
+    outputFile << "const unsigned char rc_data_" << resourceName << "[] = {";
     for (size_t i = 0; i < inputData.size(); i++)
     {
         if ((i % 100) == 0) outputFile << std::endl;
