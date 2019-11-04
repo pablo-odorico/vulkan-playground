@@ -20,7 +20,7 @@ int main(int argc, char* argv[])
     if (inputPath.empty() || outputPath.empty() || resourceName.empty())
     {
         std::cerr << "Invalid arguments." << std::endl;
-        std::cerr << "Usage: " << argv[0] << " -input file.ext -output source.cpp -name ResourceName" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " -input file.ext -output source.c -name ResourceName" << std::endl;
         return EXIT_FAILURE;
     }
 

@@ -31,7 +31,7 @@ target_link_libraries(VulkanSample Vulkan::Vulkan glfw)
 function(target_shader TARGET SHADER_PATH RESOURCE_NAME)
     set(GLSLC_BIN_PATH ${Vulkan_INCLUDE_DIR}/../bin/glslc.exe)
     get_filename_component(FILE_NAME ${SHADER_PATH} NAME)
-    set(GENERATED_FILE_PATH "${CMAKE_BINARY_DIR}/Generated/Shaders/${FILE_NAME}.bin")
+    set(GENERATED_FILE_PATH "${CMAKE_BINARY_DIR}/Generated/Shaders/${FILE_NAME}.spv")
     add_custom_command(
         OUTPUT ${GENERATED_FILE_PATH}
         COMMAND ${GLSLC_BIN_PATH} ${SHADER_PATH} -o ${GENERATED_FILE_PATH}

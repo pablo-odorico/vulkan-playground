@@ -10,13 +10,14 @@
 
 #include <vulkan/vulkan.hpp>
 
-#define LOAD_RESOURCE(NAME)                                                               \
-    extern "C" const size_t rc_size_##NAME;                                               \
-    extern "C" const unsigned char* rc_data_##NAME;                                       \
-    const std::pair<const unsigned char*, size_t> NAME = {rc_data_##NAME, rc_size_##NAME};
+#define LOAD_RESOURCE(VAR_NAME, RESOURCE_NAME) \
+    extern "C" const size_t rc_size_##RESOURCE_NAME; \
+    extern "C" const unsigned char rc_data_##RESOURCE_NAME[]; \
+    const Resource VAR_NAME = {rc_data_##RESOURCE_NAME, rc_size_##RESOURCE_NAME};
 
-LOAD_RESOURCE(vertex_shader);
-LOAD_RESOURCE(fragment_shader);
+using Resource = std::pair<const unsigned char*, size_t>;
+LOAD_RESOURCE(rcVertexShader, vertex_shader);
+LOAD_RESOURCE(rcFragmentShader, fragment_shader);
 
 struct QueueFamilyIndices
 {
@@ -68,6 +69,10 @@ private:
     vk::Queue m_GraphicsQueue;
     vk::Queue m_PresentQueue;
     QueueFamilyIndices m_QueueFamilyIndices;
+
+    vk::RenderPass m_RenderPass;
+    vk::PipelineLayout m_PipelineLayout;
+    vk::Pipeline m_GraphicsPipeline;
 
     void CreateWindow()
     {
@@ -274,11 +279,131 @@ private:
         }
     }
 
-    static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-        VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType,
-        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+    vk::UniqueShaderModule CreateShaderModule(const Resource& p_Resource)
     {
-        std::cerr << "Validation: " << pCallbackData->pMessage << std::endl;
+        std::vector<uint32_t> data(p_Resource.second / 4 + 1);
+        memcpy(data.data(), p_Resource.first, p_Resource.second);
+        vk::ShaderModuleCreateInfo createInfo;
+        createInfo.codeSize = p_Resource.second;
+        createInfo.pCode = reinterpret_cast<const uint32_t*>(data.data());
+        return m_Device.createShaderModuleUnique(createInfo);
+    }
+
+    void CreateRenderPass()
+    {
+        vk::AttachmentDescription colorAttachment;
+        colorAttachment.format = m_SwapChainImageFormat;
+        colorAttachment.samples = vk::SampleCountFlagBits::e1;
+        colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+        colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+        colorAttachment.stencilLoadOp = vk::AttachmentLoadOp::eDontCare;
+        colorAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+        colorAttachment.initialLayout = vk::ImageLayout::eUndefined;
+        colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
+
+        vk::AttachmentReference colorAttachmentRef;
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+        vk::SubpassDescription subpass;
+        subpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+        subpass.colorAttachmentCount = 1; // Fragment shader layout(location = 0) out vec4 outColor
+        subpass.pColorAttachments = &colorAttachmentRef;
+
+        vk::RenderPassCreateInfo renderPassInfo;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+        m_RenderPass = m_Device.createRenderPass(renderPassInfo);
+    }
+
+    void CreateGraphicsPipeline()
+    {
+        vk::UniqueShaderModule vertexShaderModule = CreateShaderModule(rcVertexShader);
+        vk::UniqueShaderModule fragmentShaderModule = CreateShaderModule(rcFragmentShader);
+
+        vk::PipelineShaderStageCreateInfo vertexShaderStageInfo;
+        vertexShaderStageInfo.stage = vk::ShaderStageFlagBits::eVertex;
+        vertexShaderStageInfo.module = vertexShaderModule.get();
+        vertexShaderStageInfo.pName = "main";
+
+        vk::PipelineShaderStageCreateInfo fragmentShaderStageInfo;
+        fragmentShaderStageInfo.stage = vk::ShaderStageFlagBits::eFragment;
+        fragmentShaderStageInfo.module = fragmentShaderModule.get();
+        fragmentShaderStageInfo.pName = "main";
+
+        vk::PipelineShaderStageCreateInfo shaderStageInfos[] = { vertexShaderStageInfo, fragmentShaderStageInfo };
+
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+
+        vk::PipelineInputAssemblyStateCreateInfo inputAssembly;
+        inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
+
+        vk::Viewport viewport;
+        viewport.width = m_SwapChainExtent.width;
+        viewport.height = m_SwapChainExtent.height;
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+
+        vk::Rect2D scissor;
+        scissor.offset = { 0, 0 };
+        scissor.extent = m_SwapChainExtent;
+
+        vk::PipelineViewportStateCreateInfo viewportState;
+        viewportState.viewportCount = 1;
+        viewportState.pViewports = &viewport;
+        viewportState.scissorCount = 1;
+        viewportState.pScissors = &scissor;
+
+        vk::PipelineRasterizationStateCreateInfo rasterizer;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = vk::PolygonMode::eFill;
+        rasterizer.cullMode = vk::CullModeFlagBits::eBack;
+        rasterizer.frontFace = vk::FrontFace::eClockwise;
+        rasterizer.lineWidth = 1.0f;
+
+        vk::PipelineMultisampleStateCreateInfo multisampling;
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.rasterizationSamples = vk::SampleCountFlagBits::e1;
+
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment;
+        colorBlendAttachment.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+        colorBlendAttachment.blendEnable = VK_FALSE;
+
+        vk::PipelineColorBlendStateCreateInfo colorBlending;
+        colorBlending.logicOpEnable = VK_FALSE;
+        colorBlending.attachmentCount = 1;
+        colorBlending.pAttachments = &colorBlendAttachment;
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo;
+        m_PipelineLayout = m_Device.createPipelineLayout(pipelineLayoutInfo);
+
+        vk::GraphicsPipelineCreateInfo pipelineCreateInfo;
+        pipelineCreateInfo.stageCount = 2;
+        pipelineCreateInfo.pStages = shaderStageInfos;
+        pipelineCreateInfo.pVertexInputState = &vertexInputInfo;
+        pipelineCreateInfo.pInputAssemblyState = &inputAssembly;
+        pipelineCreateInfo.pViewportState = &viewportState;
+        pipelineCreateInfo.pRasterizationState = &rasterizer;
+        pipelineCreateInfo.pMultisampleState = &multisampling;
+        pipelineCreateInfo.pDepthStencilState = nullptr;
+        pipelineCreateInfo.pColorBlendState = &colorBlending;
+        pipelineCreateInfo.pDynamicState = nullptr;
+        pipelineCreateInfo.layout = m_PipelineLayout;
+        pipelineCreateInfo.renderPass = m_RenderPass;
+        pipelineCreateInfo.subpass = 0;
+
+        m_GraphicsPipeline = m_Device.createGraphicsPipeline(nullptr, pipelineCreateInfo);
+    }
+
+    static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT p_MessageSeverity, VkDebugUtilsMessageTypeFlagsEXT p_MessageType,
+        const VkDebugUtilsMessengerCallbackDataEXT* p_pCallbackData, void* p_pUserData)
+    {
+        std::cerr << "Validation: " << p_pCallbackData->pMessage << std::endl;
 
         return VK_FALSE; // True aborts the Vulkan call that triggered the validation layer
     }
@@ -288,7 +413,7 @@ private:
         vk::DebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
         debugCreateInfo.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning;
         debugCreateInfo.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance;
-        debugCreateInfo.pfnUserCallback = debugCallback;
+        debugCreateInfo.pfnUserCallback = DebugCallback;
         return debugCreateInfo;
     }
 
@@ -298,6 +423,8 @@ private:
         CreateSurface(); // Should be called before createDevice() as it may affect the query results
         CreateDevice();
         CreateSwapChain();
+        CreateRenderPass();
+        CreateGraphicsPipeline();
     }
 
     void MainLoop()
@@ -310,6 +437,10 @@ private:
 
     void Uninitialize()
     {
+        m_Device.destroyPipeline(m_GraphicsPipeline);
+        m_Device.destroyPipelineLayout(m_PipelineLayout);
+        m_Device.destroyRenderPass(m_RenderPass);
+
         for (auto& imageView : m_SwapChainImageViews) m_Device.destroyImageView(imageView);
         m_SwapChainImageViews.clear();
 
@@ -330,15 +461,14 @@ private:
 int main()
 {
     VulkanApp app;
-    
 
-
-    try {
+    try
+    {
         app.Run();
     }
-    catch (const std::exception& e)
+    catch (const std::exception& exception)
     {
-        std::cerr << "Exception: " << e.what() << std::endl;
+        std::cerr << "Exception: " << exception.what() << std::endl;
         return EXIT_FAILURE;
     }
 
