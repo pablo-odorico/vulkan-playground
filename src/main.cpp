@@ -56,10 +56,11 @@ private:
     GLFWwindow* m_pWindow = nullptr;
 
     vk::SurfaceKHR m_Surface;
-    VkSwapchainKHR m_SwapChain;
-    std::vector<VkImage> m_SwapChainImages;
-    std::vector<VkImageView> m_SwapChainImageViews;
-    vk::Format m_SwapChainImageFormat;
+    vk::SwapchainKHR m_SwapChain;
+    std::vector<vk::Image> m_SwapChainImages;
+    std::vector<vk::ImageView> m_SwapChainImageViews;
+    std::vector<vk::Framebuffer> m_SwapChainFramebuffers;
+    vk::Format m_SwapChainImageFormat = vk::Format::eUndefined;
     vk::Extent2D m_SwapChainExtent;
 
     vk::Instance m_Instance;
@@ -73,6 +74,9 @@ private:
     vk::RenderPass m_RenderPass;
     vk::PipelineLayout m_PipelineLayout;
     vk::Pipeline m_GraphicsPipeline;
+
+    vk::CommandPool m_CommandPool;
+    std::vector<vk::CommandBuffer> m_CommandBuffers;
 
     void CreateWindow()
     {
@@ -342,8 +346,8 @@ private:
         inputAssembly.topology = vk::PrimitiveTopology::eTriangleList;
 
         vk::Viewport viewport;
-        viewport.width = m_SwapChainExtent.width;
-        viewport.height = m_SwapChainExtent.height;
+        viewport.width = static_cast<float>(m_SwapChainExtent.width);
+        viewport.height = static_cast<float>(m_SwapChainExtent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
 
@@ -399,6 +403,45 @@ private:
         m_GraphicsPipeline = m_Device.createGraphicsPipeline(nullptr, pipelineCreateInfo);
     }
 
+    void CreateFramebuffers()
+    {
+        for (vk::ImageView& swapChainImageView : m_SwapChainImageViews)
+        {
+            vk::ImageView attachments[] = { swapChainImageView };
+
+            vk::FramebufferCreateInfo createInfo;
+            createInfo.renderPass = m_RenderPass;
+            createInfo.attachmentCount = 1;
+            createInfo.pAttachments = attachments;
+            createInfo.width = m_SwapChainExtent.width;
+            createInfo.height = m_SwapChainExtent.height;
+            createInfo.layers = 1;
+
+            m_SwapChainFramebuffers.push_back(m_Device.createFramebuffer(createInfo));
+        }
+    }
+
+    void CreateCommandBuffers()
+    {
+        vk::CommandPoolCreateInfo poolInfo;
+        poolInfo.queueFamilyIndex = m_QueueFamilyIndices.graphics.value();
+        // If our command buffers were going to be created often
+        //poolInfo.flags = vk::CommandPoolCreateFlagBits::eTransient; 
+        m_CommandPool = m_Device.createCommandPool(poolInfo);
+
+        vk::CommandBufferAllocateInfo allocInfo;
+        allocInfo.commandPool = m_CommandPool;
+        allocInfo.level = vk::CommandBufferLevel::ePrimary;
+        allocInfo.commandBufferCount = static_cast<uint32_t>(m_SwapChainFramebuffers.size());
+        m_CommandBuffers = m_Device.allocateCommandBuffers(allocInfo);
+
+        for (vk::CommandBuffer& commandBuffer : m_CommandBuffers)
+        {
+            vk::CommandBufferBeginInfo beginInfo;
+            commandBuffer.begin(beginInfo);
+        }
+    }
+
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT p_MessageSeverity, VkDebugUtilsMessageTypeFlagsEXT p_MessageType,
         const VkDebugUtilsMessengerCallbackDataEXT* p_pCallbackData, void* p_pUserData)
@@ -425,6 +468,8 @@ private:
         CreateSwapChain();
         CreateRenderPass();
         CreateGraphicsPipeline();
+        CreateFramebuffers();
+        CreateCommandBuffers();
     }
 
     void MainLoop()
@@ -437,6 +482,10 @@ private:
 
     void Uninitialize()
     {
+        m_Device.destroyCommandPool(m_CommandPool);
+
+        for (auto framebuffer : m_SwapChainFramebuffers) m_Device.destroyFramebuffer(framebuffer);
+
         m_Device.destroyPipeline(m_GraphicsPipeline);
         m_Device.destroyPipelineLayout(m_PipelineLayout);
         m_Device.destroyRenderPass(m_RenderPass);
