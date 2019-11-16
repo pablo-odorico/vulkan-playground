@@ -6,7 +6,7 @@ The project is written in C++17 and includes CMake rules and a Resource Compiler
 
 Tested with:
 * Windows 10: Visual Studio 2019, Vulkan SDK 1.1.121.2
-* Ubuntu 19.10: clang 9.0, Vulkan SDK 1.1.114 from packages `libvulkan-dev vulkan-utils xorg-dev`
+* Ubuntu 19.10: clang 9.0, Vulkan SDK 1.1.126 from the [Ubuntu Repo](https://packages.lunarg.com/)
 
 Requires Vulkan-Hpp repo cloned at the same level:
 
