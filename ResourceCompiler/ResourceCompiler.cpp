@@ -48,6 +48,7 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
+    outputFile << "#include <stddef.h> // size_t" << std::endl;
     outputFile << "const unsigned char rc_data_" << resourceName << "[] = {";
     for (size_t i = 0; i < inputData.size(); i++)
     {
