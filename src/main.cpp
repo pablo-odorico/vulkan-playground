@@ -16,8 +16,8 @@
     const Resource VAR_NAME = {rc_data_##RESOURCE_NAME, rc_size_##RESOURCE_NAME};
 
 using Resource = std::pair<const unsigned char*, size_t>;
-LOAD_RESOURCE(rcVertexShader, vertex_shader);
-LOAD_RESOURCE(rcFragmentShader, fragment_shader);
+LOAD_RESOURCE(rcVertexShader, vertex_shader)
+LOAD_RESOURCE(rcFragmentShader, fragment_shader)
 
 struct QueueFamilyIndices
 {
@@ -152,12 +152,17 @@ private:
 
         m_Instance = vk::createInstance(createInfo, nullptr);
 
+#ifndef _WIN64
         vk::DynamicLoader dl;
         PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
         m_DynamicLoader.init(vkGetInstanceProcAddr);
         m_DynamicLoader.init(m_Instance);
-
-        m_DebugMessenger = m_Instance.createDebugUtilsMessengerEXT(GetDebugCreateInfo(), nullptr, m_DynamicLoader);
+        auto loader = m_DynamicLoader;
+#else
+        auto loader = vk::DispatchLoaderDynamic(m_Instance);
+#endif
+        
+        m_DebugMessenger = m_Instance.createDebugUtilsMessengerEXT(GetDebugCreateInfo(), nullptr, loader);
     }
 
     void CreateSurface()
@@ -208,7 +213,9 @@ private:
         deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
         m_Device = m_PhysicalDevice.createDevice(deviceCreateInfo);
+#ifndef _WIN64
         m_DynamicLoader.init(m_Device);
+#endif
 
         m_GraphicsQueue = m_Device.getQueue(m_QueueFamilyIndices.graphics.value(), 0);
         m_PresentQueue = m_Device.getQueue(m_QueueFamilyIndices.present.value(), 0);
@@ -502,10 +509,16 @@ private:
 
         m_SwapChainImages.clear(); // No need to destroy, we didn't create them
 
+#ifndef _WIN64
+        auto loader = m_DynamicLoader;
+#else
+        auto loader = vk::DispatchLoaderDynamic(m_Instance);
+#endif
+
         m_Device.destroySwapchainKHR(m_SwapChain);
         m_Device.destroy();
         m_Instance.destroySurfaceKHR(m_Surface);
-        m_Instance.destroyDebugUtilsMessengerEXT(m_DebugMessenger, nullptr, m_DynamicLoader);
+        m_Instance.destroyDebugUtilsMessengerEXT(m_DebugMessenger, nullptr, loader);
         m_Instance.destroy();
 
         glfwDestroyWindow(m_pWindow);
