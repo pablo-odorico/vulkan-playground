@@ -50,7 +50,7 @@ public:
     }
 
 private:
-    const uint32_t WIDTH = 1280;
+    const uint32_t WIDTH = 1024;
     const uint32_t HEIGHT = 720;
 
     GLFWwindow* m_pWindow = nullptr;
@@ -79,6 +79,13 @@ private:
     vk::CommandPool m_CommandPool;
     std::vector<vk::CommandBuffer> m_CommandBuffers;
 
+    std::vector<vk::Semaphore> m_ImageAvailableSemaphores;
+    std::vector<vk::Semaphore> m_RenderFinishedSemaphores;
+    std::vector<vk::Fence> m_InFlightFences;
+    std::vector<vk::Fence> m_ImagesInFlight;
+    const int MAX_FRAMES_IN_FLIGHT = 2;
+    size_t currentFrame = 0;
+
     void CreateWindow()
     {
         glfwInit();
@@ -87,6 +94,19 @@ private:
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
         m_pWindow = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+    }
+
+    void InitializeVulkan()
+    {
+        CreateInstance();
+        CreateSurface(); // Should be called before createDevice() as it may affect the query results
+        CreateDevice();
+        CreateSwapChain();
+        CreateRenderPass();
+        CreateGraphicsPipeline();
+        CreateFramebuffers();
+        CreateCommandBuffers();
+        CreateSyncObjects();
     }
 
     std::vector<const char*> GetValidationLayers()
@@ -334,6 +354,16 @@ private:
         renderPassInfo.subpassCount = 1;
         renderPassInfo.pSubpasses = &subpass;
 
+        vk::SubpassDependency dependency;
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+        dependency.srcAccessMask = vk::AccessFlags();
+        dependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+        dependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite;
+        renderPassInfo.dependencyCount = 1;
+        renderPassInfo.pDependencies = &dependency;
+
         m_RenderPass = m_Device.createRenderPass(renderPassInfo);
     }
 
@@ -449,11 +479,93 @@ private:
         allocInfo.commandBufferCount = static_cast<uint32_t>(m_SwapChainFramebuffers.size());
         m_CommandBuffers = m_Device.allocateCommandBuffers(allocInfo);
 
-        for (vk::CommandBuffer& commandBuffer : m_CommandBuffers)
+        assert(m_SwapChainFramebuffers.size() == m_CommandBuffers.size());
+        for (size_t i = 0; i < m_CommandBuffers.size(); i++)
         {
+            vk::CommandBuffer& commandBuffer = m_CommandBuffers[i];
             vk::CommandBufferBeginInfo beginInfo;
             commandBuffer.begin(beginInfo);
+
+            vk::RenderPassBeginInfo renderPassInfo;
+            renderPassInfo.renderPass = m_RenderPass;
+            renderPassInfo.framebuffer = m_SwapChainFramebuffers[i];
+            renderPassInfo.renderArea.offset = vk::Offset2D{0, 0};
+            renderPassInfo.renderArea.extent = m_SwapChainExtent;
+
+            vk::ClearValue clearColor(std::array<float, 4>{ 0.2f, 0.2f, 0.2f, 1.0f });
+            renderPassInfo.clearValueCount = 1;
+            renderPassInfo.pClearValues = &clearColor;
+
+            commandBuffer.beginRenderPass(renderPassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
+            commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, m_GraphicsPipeline);
+            commandBuffer.draw(3, 1, 0, 0);
+            commandBuffer.endRenderPass();
+            commandBuffer.end();
         }
+    }
+
+    void CreateSyncObjects()
+    {
+        vk::SemaphoreCreateInfo semaphoreInfo;
+
+        m_ImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        for (vk::Semaphore& semaphore : m_ImageAvailableSemaphores) semaphore = m_Device.createSemaphore(semaphoreInfo);
+
+        m_RenderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        for (vk::Semaphore& semaphore : m_RenderFinishedSemaphores) semaphore = m_Device.createSemaphore(semaphoreInfo);
+
+        vk::FenceCreateInfo fenceInfo;
+        fenceInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+
+        m_InFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+        for (vk::Fence& fence : m_InFlightFences) fence = m_Device.createFence(fenceInfo);
+
+        m_ImagesInFlight.resize(m_SwapChainImages.size());
+    }
+
+    void DrawFrame()
+    {
+        vk::Semaphore& availableSemaphore = m_ImageAvailableSemaphores[currentFrame];
+        vk::Semaphore& renderFinishedSemaphore = m_RenderFinishedSemaphores[currentFrame];
+        vk::Fence& inFlightFence = m_InFlightFences[currentFrame];
+
+        m_Device.waitForFences({ inFlightFence }, VK_TRUE, UINT64_MAX);
+
+        const uint32_t imageIndex = m_Device.acquireNextImageKHR(m_SwapChain, UINT64_MAX, availableSemaphore, vk::Fence()).value;
+
+        // Check if a previous frame is using this image (i.e. there is its fence to wait on)
+        vk::Fence& imageInFlightFence = m_ImagesInFlight[imageIndex];
+        if (imageInFlightFence) {
+            m_Device.waitForFences({ imageInFlightFence }, VK_TRUE, UINT64_MAX);
+        }
+        // Mark the image as now being in use by this frame
+        imageInFlightFence = inFlightFence;
+
+        vk::SubmitInfo submitInfo;
+        vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = &availableSemaphore;
+        submitInfo.pWaitDstStageMask = waitStages;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &m_CommandBuffers[imageIndex];
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = &renderFinishedSemaphore;
+       
+        m_Device.resetFences({ inFlightFence });
+
+        m_GraphicsQueue.submit({ submitInfo }, inFlightFence);
+
+        vk::PresentInfoKHR presentInfo;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = &renderFinishedSemaphore;
+
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = &m_SwapChain;
+        presentInfo.pImageIndices = &imageIndex;
+
+        m_PresentQueue.presentKHR(presentInfo);
+
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
@@ -474,28 +586,24 @@ private:
         return debugCreateInfo;
     }
 
-    void InitializeVulkan()
-    {
-        CreateInstance();
-        CreateSurface(); // Should be called before createDevice() as it may affect the query results
-        CreateDevice();
-        CreateSwapChain();
-        CreateRenderPass();
-        CreateGraphicsPipeline();
-        CreateFramebuffers();
-        CreateCommandBuffers();
-    }
-
     void MainLoop()
     {
         while (!glfwWindowShouldClose(m_pWindow))
         {
             glfwPollEvents();
+            DrawFrame();
         }
+
+        // Wait before we start to uninit stuff
+        m_Device.waitIdle();
     }
 
     void Uninitialize()
     {
+        for (vk::Semaphore& semaphore : m_RenderFinishedSemaphores) m_Device.destroySemaphore(semaphore);
+        for (vk::Semaphore& semaphore : m_ImageAvailableSemaphores) m_Device.destroySemaphore(semaphore);
+        for (vk::Fence& fence : m_InFlightFences) m_Device.destroyFence(fence);
+
         m_Device.destroyCommandPool(m_CommandPool);
 
         for (auto framebuffer : m_SwapChainFramebuffers) m_Device.destroyFramebuffer(framebuffer);
